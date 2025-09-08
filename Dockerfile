@@ -1,33 +1,54 @@
-# STAGE 1: Build
-FROM golang:1.12-alpine AS build
+########## Modern multi-stage build (frontend + backend) ##########
+# 1. Build frontend (Next.js) with Bun
+FROM oven/bun:1 AS frontend
+WORKDIR /app/web
 
-# Install Node and NPM.
-RUN apk update && apk upgrade && apk add --no-cache git nodejs bash npm
+# Copy only dependency manifests first for better layer caching
+COPY web/package.json web/bun.lockb* ./
+COPY web/tsconfig.json web/tailwind.config.* web/postcss.config.* ./
 
-# Get dependencies for Go part of build
-RUN go get -u github.com/jteeuwen/go-bindata/...
+# Install dependencies (cached if manifest unchanged)
+RUN bun install
 
-WORKDIR /go/src/github.com/kubernetes-up-and-running/kuard
+# Copy the rest of the frontend source
+COPY web/. .
 
-# Copy all sources in
+# Build production assets (configured for static export via next.config.js -> out/)
+RUN bun run build
+
+# 2. Build backend (Go)
+FROM golang:1.25-alpine AS backend
+WORKDIR /app
+RUN apk add --no-cache git ca-certificates build-base
+
+ARG VERSION=dev
+ARG COLOR=blue
+ENV CGO_ENABLED=0
+
+# Cache go modules
+COPY go.mod go.sum ./
+RUN go mod download
+
+# Copy backend sources (exclude web node_modules by not copying their artifacts from root)
 COPY . .
 
-# This is a set of variables that the build script expects
-ENV VERBOSE=0
-ENV PKG=github.com/kubernetes-up-and-running/kuard
-ENV ARCH=amd64
-ENV VERSION=test
+# Inject version (git describe + color) into pkg/version.VERSION
+RUN --mount=type=cache,target=/root/.cache/go-build \
+	--mount=type=cache,target=/go/pkg \
+	go build -ldflags "-s -w -X github.com/kubernetes-up-and-running/kuard/pkg/version.VERSION=${VERSION}-${COLOR}" -o /app/kuard ./cmd/kuard
 
-# When running on Windows 10, you need to clean up the ^Ms in the script
-RUN dos2unix build/build.sh
+# 3. Minimal runtime image
+FROM gcr.io/distroless/static:nonroot AS runtime
+WORKDIR /app
+COPY --from=backend /app/kuard /app/kuard
+COPY --from=frontend /app/web/out /app/web/out
 
-# Do the build. Script is part of incoming sources.
-RUN build/build.sh
+USER nonroot:nonroot
+EXPOSE 8080
+ENTRYPOINT ["/app/kuard"]
 
-# STAGE 2: Runtime
-FROM alpine
-
-USER nobody:nobody
-COPY --from=build /go/bin/kuard /kuard
-
-CMD [ "/kuard" ]
+LABEL org.opencontainers.image.source="https://github.com/kubernetes-up-and-running/kuard" \
+	  org.opencontainers.image.title="kuard" \
+	  org.opencontainers.image.description="Kubernetes Up and Running Demo (modernized build)" \
+	  org.opencontainers.image.version="${VERSION}-${COLOR}" \
+	  org.opencontainers.image.licenses="Apache-2.0"

@@ -23,9 +23,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/julienschmidt/httprouter"
 	"github.com/kubernetes-up-and-running/kuard/pkg/apiutils"
 	"github.com/kubernetes-up-and-running/kuard/pkg/htmlutils"
+	"github.com/kubernetes-up-and-running/kuard/pkg/route"
 )
 
 const maxHistory = 20
@@ -50,17 +50,17 @@ func New() *Probe {
 	return &Probe{}
 }
 
-func (p *Probe) AddRoutes(r *httprouter.Router, base string) {
-	r.GET(base, p.Handle)
-	r.GET(base+"/api", p.APIGet)
-	r.PUT(base+"/api", p.APIPut)
+func (p *Probe) AddRoutes(r route.Router, base string) {
+	r.GET(base, http.HandlerFunc(p.Handle))
+	r.GET(base+"/api", http.HandlerFunc(p.APIGet))
+	r.PUT(base+"/api", http.HandlerFunc(p.APIPut))
 
 	if p.basePath != "" {
 		p.basePath = base
 	}
 }
 
-func (p *Probe) APIGet(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
+func (p *Probe) APIGet(w http.ResponseWriter, r *http.Request) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
@@ -85,7 +85,7 @@ func (p *Probe) lockedGet(w http.ResponseWriter, r *http.Request) {
 	apiutils.ServeJSON(w, s)
 }
 
-func (p *Probe) APIPut(w http.ResponseWriter, r *http.Request, params httprouter.Params) {
+func (p *Probe) APIPut(w http.ResponseWriter, r *http.Request) {
 	c := ProbeConfig{}
 
 	err := json.NewDecoder(r.Body).Decode(&c)
@@ -96,10 +96,10 @@ func (p *Probe) APIPut(w http.ResponseWriter, r *http.Request, params httprouter
 
 	p.SetConfig(c)
 
-	p.APIGet(w, r, params)
+	p.APIGet(w, r)
 }
 
-func (p *Probe) Handle(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
+func (p *Probe) Handle(w http.ResponseWriter, r *http.Request) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 

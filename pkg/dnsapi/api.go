@@ -22,8 +22,8 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/julienschmidt/httprouter"
 	"github.com/kubernetes-up-and-running/kuard/pkg/apiutils"
+	"github.com/kubernetes-up-and-running/kuard/pkg/route"
 	"github.com/miekg/dns"
 )
 
@@ -44,11 +44,11 @@ func New() *DNSAPI {
 	return &DNSAPI{}
 }
 
-func (e *DNSAPI) AddRoutes(r *httprouter.Router, base string) {
-	r.POST(base+"/api", e.APIGet)
+func (e *DNSAPI) AddRoutes(r route.Router, base string) {
+	r.POST(base+"/api", http.HandlerFunc(e.APIGet))
 }
 
-func (e *DNSAPI) APIGet(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
+func (e *DNSAPI) APIGet(w http.ResponseWriter, r *http.Request) {
 	dreq := &DNSRequest{}
 
 	err := json.NewDecoder(r.Body).Decode(dreq)

@@ -21,12 +21,14 @@ import (
 	"crypto/rand"
 	"crypto/rsa"
 	"fmt"
-	"log"
+	"log/slog"
 	"sync"
 
 	"golang.org/x/crypto/ssh"
 
-	"github.com/julienschmidt/httprouter"
+	"net/http"
+
+	"github.com/kubernetes-up-and-running/kuard/pkg/route"
 )
 
 const maxHistory = 20
@@ -47,9 +49,9 @@ func New() *KeyGen {
 	return kg
 }
 
-func (kg *KeyGen) AddRoutes(router *httprouter.Router, base string) {
-	router.GET(base, kg.APIGet)
-	router.PUT(base, kg.APIPut)
+func (kg *KeyGen) AddRoutes(router route.Router, base string) {
+	router.GET(base, http.HandlerFunc(kg.APIGet))
+	router.PUT(base, http.HandlerFunc(kg.APIPut))
 }
 
 func (kg *KeyGen) Restart() {
@@ -86,7 +88,7 @@ func (kg *KeyGen) WorkloadOutput(s string) {
 	kg.mu.Lock()
 	defer kg.mu.Unlock()
 
-	log.Print(s)
+	slog.Info("workload output", "data", s)
 
 	kg.history = append(kg.history, History{ID: kg.nextHistoryID, Data: s})
 	if len(kg.history) > maxHistory {

@@ -1,3 +1,26 @@
+# Legacy style single stage Dockerfile (no multi-stage). Not recommended for production
+# but preserved (modernized) for users following the original book instructions.
+# Produces a larger image containing toolchain.
+
+FROM golang:1.25-alpine
+
+RUN apk add --no-cache git bash ca-certificates build-base curl
+
+WORKDIR /src
+COPY go.mod go.sum ./
+RUN go mod download
+
+COPY . .
+
+ARG VERSION=dev
+ARG COLOR=blue
+ENV CGO_ENABLED=0
+
+RUN go build -ldflags "-s -w -X github.com/kubernetes-up-and-running/kuard/pkg/version.VERSION=${VERSION}-${COLOR}" -o /usr/local/bin/kuard ./cmd/kuard
+
+USER nobody:nobody
+EXPOSE 8080
+ENTRYPOINT ["/usr/local/bin/kuard"]
 FROM golang:1.11-alpine AS build
 
 # Install Node and NPM.

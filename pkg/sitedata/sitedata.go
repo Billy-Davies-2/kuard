@@ -5,7 +5,7 @@ Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
 
-    http://www.apache.org/licenses/LICENSE-2.0
+	http://www.apache.org/licenses/LICENSE-2.0
 
 Unless required by applicable law or agreed to in writing, software
 distributed under the License is distributed on an "AS IS" BASIS,
@@ -16,16 +16,14 @@ limitations under the License.
 package sitedata
 
 import (
-	"io/ioutil"
+	"fmt"
+	"io/fs"
 	"net/http"
 	"os"
-	"path"
 	"path/filepath"
 	"strings"
 
-	assetfs "github.com/elazarl/go-bindata-assetfs"
-	"github.com/julienschmidt/httprouter"
-	"github.com/pkg/errors"
+	"github.com/kubernetes-up-and-running/kuard/pkg/route"
 )
 
 var debug bool
@@ -36,28 +34,23 @@ func SetConfig(d bool, drd string) {
 	debugRootDir = drd
 }
 
-func GetStaticHandler(prefix string) httprouter.Handle {
-	prefix = strings.TrimPrefix(prefix, "/")
-	embedFS := &assetfs.AssetFS{
-		Asset:     Asset,
-		AssetDir:  func(path string) ([]string, error) { return nil, os.ErrNotExist },
-		AssetInfo: AssetInfo,
-		Prefix:    prefix,
-	}
-	embedHandler := http.StripPrefix("/"+prefix+"/", http.FileServer(embedFS))
+// We place this file in pkg/sitedata so we cannot use .. in patterns (forbidden).
+// Create a mirror directory under this package at build time? Instead embed from root using go:embed in root-level package? Simpler: we traverse real disk when debug, and for embedded we duplicate minimal assets via go:embed by referencing relative path from module root using an internal package.
 
-	return func(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
+func GetStaticHandler(prefix string) http.Handler {
+	prefix = strings.TrimPrefix(prefix, "/")
+	baseDir := "sitedata" // relative to working directory
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		seg := filepath.Base(prefix) // built or static
+		dir := filepath.Join(baseDir, seg)
 		if debug {
-			fs := http.Dir(filepath.Join(debugRootDir, prefix))
-			handler := http.StripPrefix("/"+prefix+"/", http.FileServer(fs))
-			handler.ServeHTTP(w, r)
-		} else {
-			embedHandler.ServeHTTP(w, r)
+			dir = filepath.Join(debugRootDir, prefix)
 		}
-	}
+		http.StripPrefix("/"+prefix+"/", http.FileServer(http.Dir(dir))).ServeHTTP(w, r)
+	})
 }
 
-func AddRoutes(r *httprouter.Router, prefix string) {
+func AddRoutes(r route.Router, prefix string) {
 	r.GET(prefix+"/*filepath", GetStaticHandler(prefix))
 }
 
@@ -65,29 +58,36 @@ func LoadFilesInDir(dir string) (map[string]string, error) {
 	dirData := map[string]string{}
 	if debug {
 		fullDir := filepath.Join(debugRootDir, dir)
-		files, err := ioutil.ReadDir(fullDir)
+		files, err := os.ReadDir(fullDir)
 		if err != nil {
-			return dirData, errors.Wrapf(err, "Error reading dir %v", debugRootDir)
+			return dirData, fmt.Errorf("error reading dir %s: %w", debugRootDir, err)
 		}
 		for _, file := range files {
-			data, err := ioutil.ReadFile(filepath.Join(fullDir, file.Name()))
+			data, err := os.ReadFile(filepath.Join(fullDir, file.Name()))
 			if err != nil {
-				return dirData, errors.Wrapf(err, "Error loading %v", file.Name())
+				return dirData, fmt.Errorf("error loading %s: %w", file.Name(), err)
 			}
-			dirData[file.Name()] = string(data)
+			// convert fs.DirEntry to FileInfo not needed; use Name directly
+			if file.Type().IsRegular() || (file.Type() == fs.ModeSymlink) {
+				dirData[file.Name()] = string(data)
+			}
 		}
 	} else {
-		files, err := AssetDir(dir)
+		// Production: read from disk (sitedata/templates)
+		templDir := filepath.Join("sitedata", dir)
+		entries, err := os.ReadDir(templDir)
 		if err != nil {
-			return dirData, errors.Wrapf(err, "Could not load bindata dir %v", dir)
+			return dirData, fmt.Errorf("could not read templates dir: %w", err)
 		}
-		for _, file := range files {
-			fullName := path.Join("templates", file)
-			data, err := Asset(fullName)
-			if err != nil {
-				return dirData, errors.Wrapf(err, "Error loading bindata %v", fullName)
+		for _, e := range entries {
+			if e.IsDir() {
+				continue
 			}
-			dirData[file] = string(data)
+			b, err := os.ReadFile(filepath.Join(templDir, e.Name()))
+			if err != nil {
+				return dirData, fmt.Errorf("error loading template %s: %w", e.Name(), err)
+			}
+			dirData[e.Name()] = string(b)
 		}
 	}
 	return dirData, nil

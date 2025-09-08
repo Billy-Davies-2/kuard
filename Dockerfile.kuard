@@ -1,3 +1,25 @@
+# Template single-arch runtime image (legacy style) modernized.
+# This file is kept for compatibility with older workflows that generated
+# a per-arch Dockerfile via sed replacements. The recommended build path is
+# the root multi-stage Dockerfile, but tooling expecting this template can
+# still function.
+#
+# Expected ARG values to be substituted by tooling:
+#   ARG_FROM   - base image (e.g. gcr.io/distroless/static:nonroot)
+#   ARG_FAKEVER - color variant (blue/green/purple)
+#   ARG_ARCH   - target arch directory (for path reference if needed)
+
+FROM ARG_FROM
+
+LABEL org.opencontainers.image.title="kuard" \
+      org.opencontainers.image.version="ARG_FAKEVER" \
+      org.opencontainers.image.licenses="Apache-2.0"
+
+# Copy pre-built binary produced externally (Makefile / build system)
+ADD bin/ARG_FAKEVER/ARG_ARCH/kuard /kuard
+USER nonroot:nonroot
+EXPOSE 8080
+ENTRYPOINT ["/kuard"]
 # Copyright 2017 The KUAR Authors
 #
 # Licensed under the Apache License, Version 2.0 (the "License");

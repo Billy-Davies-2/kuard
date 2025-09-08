@@ -21,8 +21,8 @@ import (
 	"os"
 	"strings"
 
-	"github.com/julienschmidt/httprouter"
 	"github.com/kubernetes-up-and-running/kuard/pkg/apiutils"
+	"github.com/kubernetes-up-and-running/kuard/pkg/route"
 )
 
 // EnvStatus is returned from a GET to this API endpoing
@@ -38,11 +38,11 @@ func New() *Env {
 	return &Env{}
 }
 
-func (e *Env) AddRoutes(r *httprouter.Router, base string) {
-	r.GET(base+"/api", e.APIGet)
+func (e *Env) AddRoutes(r route.Router, base string) {
+	r.GET(base+"/api", http.HandlerFunc(e.APIGet))
 }
 
-func (e *Env) APIGet(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
+func (e *Env) APIGet(w http.ResponseWriter, r *http.Request) {
 	s := EnvStatus{}
 
 	s.CommandLine = os.Args

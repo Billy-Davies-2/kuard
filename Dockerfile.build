@@ -1,3 +1,40 @@
+# Modernized builder image for kuard
+# Retains legacy purpose (pre-baked build env + cached stdlib) but updates to Go 1.25
+# and removes abandoned dependencies. Prefer the root multi-stage Dockerfile for
+# typical production builds. This is provided for users following the original
+# book workflow that relied on a separate build image.
+#
+# Example usage:
+#   docker build -t kuard-build -f Dockerfile.build --build-arg ALL_ARCH="amd64 arm64" .
+#   docker run --rm -v "$PWD":/workspace -w /workspace kuard-build make build
+
+FROM golang:1.25-alpine
+
+ARG ALL_ARCH="amd64 arm64"
+ENV ALL_ARCH=${ALL_ARCH}
+
+RUN apk add --no-cache git bash curl ca-certificates build-base unzip
+
+# Bun for building Next.js frontend if desired.
+ENV BUN_INSTALL=/usr/local/bun
+RUN curl -fsSL https://bun.sh/install | bash && \
+    ln -s /usr/local/bun/bin/bun /usr/local/bin/bun
+
+WORKDIR /data
+ENV HOME=/data \
+    GOPATH=/data/go \
+    PATH=/data/go/bin:/usr/local/bun/bin:$PATH
+
+# Pre-create architecture specific stdlib cache directories (mirrors legacy optimization intent)
+RUN for ARCH in $(echo ${ALL_ARCH}); do \
+      mkdir -p /data/std/$ARCH; \
+    done
+
+LABEL org.opencontainers.image.source="https://github.com/kubernetes-up-and-running/kuard" \
+      org.opencontainers.image.description="Reusable kuard builder (Go + Bun)" \
+      org.opencontainers.image.licenses="Apache-2.0"
+
+CMD ["bash"]
 # Copyright 2017 The KUAR Authors
 #
 # Licensed under the Apache License, Version 2.0 (the "License");

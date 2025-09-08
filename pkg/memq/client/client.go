@@ -24,7 +24,6 @@ import (
 	"path"
 
 	"github.com/kubernetes-up-and-running/kuard/pkg/memq"
-	"github.com/pkg/errors"
 )
 
 type Client struct {
@@ -33,7 +32,7 @@ type Client struct {
 
 func errorFromResponse(resp *http.Response) error {
 	if resp.StatusCode >= 300 {
-		return errors.Errorf("HTTP Error: %v", resp.Status)
+		return fmt.Errorf("HTTP error: %s", resp.Status)
 	}
 	return nil
 }

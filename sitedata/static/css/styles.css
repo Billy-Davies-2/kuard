@@ -74,6 +74,13 @@ a.nav-item.active {
   width: auto;
 }
 
+.fs-browser { margin-top: 1rem; }
+.fs-toolbar { margin-bottom: .5rem; display:flex; gap:1rem; align-items:center; flex-wrap:wrap; }
+.fs-toolbar .breadcrumbs { font-family: monospace; cursor:pointer; }
+.fs-toolbar .crumb:hover { text-decoration: underline; }
+.fs-table tbody tr.dir-row { font-weight: 600; }
+.fs-table tbody tr:hover { background: #f5f5f5; }
+
 form {
   padding: 1rem;
 }

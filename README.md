@@ -2,64 +2,55 @@
 
 ![screenshot](docs/images/screenshot.png)
 
-### Running
+### Quick Run (Kubernetes)
 
 ```
 kubectl run --restart=Never --image=gcr.io/kuar-demo/kuard-amd64:blue kuard
 kubectl port-forward kuard 8080:8080
 ```
 
-Open your browser to [http://localhost:8080](http://localhost:8080).
+Then browse to http://localhost:8080 (UI now served at root `/`).
 
-### Building
+### Building (Local)
 
-We have ~3 ways to build.
-This has changed slightly from when the book is published so I'd view this as authoritative.
+We now use:
+* Go 1.25
+* Bun + Next.js for the web UI (TailwindCSS v4)
+* Multi‑stage Docker build (frontend → Go binary → distroless runtime)
 
-#### Insert Binary
-
-This aligns with what is in the book.
-You need to build the binary to run *somehow* and then insert it into a Docker image.
-The easiest way to do this is to use the fully automated make system to build the binary and then create a Dockerfile for creating an image.
-
-Create the binary by typing `make` at the command line. This'll build a docker image and then run it to compile the binary.
-
-Now create a minimal Dockerfile to contain that binary:
+Standard targets (see `Makefile`):
 
 ```
-FROM alpine
-COPY bin/blue/amd64/kuard /kuard
-ENTRYPOINT [ "/kuard" ]
+make build        # build kuard binary + frontend (production)
+make test         # run unit + integration + fuzz seeds
+make cover        # generate coverage.html
+make image        # build multi-arch container image (requires buildx setup)
+make push-all-colors REGISTRY=<your-registry>
 ```
 
-Overwrite `Dockerfile` with this and then run `docker build -t kuard-amd64:blue .`.
-Run with `docker run --rm -ti --name kuard --publish 8080:8080 kuard-amd64:blue`.
-
-To upload to a registry you'll have to tag it and push to your registry.  Refer to your registry documentation for details.
+#### Legacy "Insert Binary" Pattern
+Still possible, but the multi-stage `Dockerfile` replaces this. See previous revisions if needed.
 
 #### Multi-stage Dockerfile
 
-A new feature of Docker, since the book was published, is a "multi-stage" build.
-This is a way to run build multiple images and then copy files between them.
-
-The `Dockerfile` at the root of this repo is an example of that.
-It creates one image to build kuard and then another image for running kuard.
-
-You can easily build an image with `docker build -t kuard-amd64:blue .`.
-Run with `docker run --rm -ti --name kuard --publish 8080:8080 kuard-amd64:blue`.
-
-To upload to a registry you'll have to tag it and push to your registry.  Refer to your registry documentation for details.
-
-#### Fancy Makefile for automated build and push
-
-This will build and push container images to a registry.
-This builds a set of images with "fake versions" (see below) to be able to play with upgrades.
-
 ```
-make all-push REGISTRY=<my-gcr-registry>
+docker build -t kuard:dev .
+docker run --rm -p 8080:8080 kuard:dev
 ```
 
-If you are having trouble, try issuing a `make clean` to reset stuff.
+Multi-arch (example):
+```
+docker buildx build --platform linux/amd64,linux/arm64 -t <reg>/kuard:blue --push .
+```
+
+#### Makefile Convenience
+
+```
+make clean        # remove build artifacts
+make push-all-colors REGISTRY=<reg>  # push blue, green, purple variants
+```
+
+If something seems off: `make clean`.
 
 ### KeyGen Workload
 
@@ -75,20 +66,21 @@ To help simulate batch workers, we have a synthetic workload of generating 4096 
 --keygen-time-to-run int      The target run time in seconds. Set to 0 for infinite
 ```
 
-### MemQ server
+### Queue API (NATS JetStream Only)
 
-We also have a simple in memory queue with REST API.  This is based heavily on https://github.com/kelseyhightower/memq.
+MemQ has been simplified to rely exclusively on NATS JetStream. Set `NATS_URL` (default `nats://127.0.0.1:4222`). If NATS is unreachable, queue APIs will return errors.
+Endpoints (query param style) under base path `/memq/server`:
 
-The API is as follows with URLs being relative to `<server addr>/memq/server`.  See `pkg/memq/types.go` for the data structures returned.
+| Method | URL | Query | Desc |
+|--------|-----|-------|------|
+| GET | `/stats` | – | Stats for all queues |
+| PUT | `/queues` | `?queue=<name>` | Create queue |
+| DELETE | `/queues` | `?queue=<name>` | Delete queue |
+| POST | `/queues/drain` | `?queue=<name>` | Drain queue |
+| POST | `/queues/enqueue` | `?queue=<name>` | Enqueue (body=text) |
+| POST | `/queues/dequeue` | `?queue=<name>` | Dequeue (204 if empty) |
 
-| Method | Url | Desc
-| --- | --- | ---
-| `GET` | `/stats` | Get stats on all queues
-| `PUT` | `/queues/:queue` | Create a queue
-| `DELETE` | `/queues/:queue` | Delete a queue
-| `POST` | `/queues/:queue/drain` | Discard all items in queue
-| `POST` | `/queues/:queue/enqueue` | Add item to queue.  Body is plain text. Response is message object.
-| `POST` | `/queues/:queue/dequeue` | Grab an item off the queue and return it. Returns a 204 "No Content" if queue is empty.
+Queues map to JetStream streams (name prefix `MEMQ_` and subjects `memq.<queue>`). Messages persist across restarts; drain uses stream purge preserving consumers.
 
 ### Versions
 
@@ -111,30 +103,63 @@ For documentation where you want to demonstrate using versions but use the lates
 
 We also build versions for `arm`, `arm64`, and `ppc64le`.  Just substitute the appropriate architecture in the image name.  These aren't as well tested as the `amd64` version but seem to work okay.
 
-### Development
+### Development (Go + Next.js UI)
 
-If you just want to do Go server development, you can build the client as part of a build `make`.  It'll drop the result in to `sitedata/built/`.
+Backend only:
+```
+go run ./cmd/kuard --debug
+```
 
-If you want to do both Go server and React.js client dev, you need to do the following:
+Full stack live dev (two terminals):
+1. Start Go server (proxy mode enabled automatically for dev UI detection):
+```
+go run ./cmd/kuard --debug
+```
+2. Start frontend dev server:
+```
+cd web
+bun install
+bun run dev   # serves on :8081
+```
+3. Visit: http://localhost:8080 (server proxies to Next.js dev when available).
 
-1. Have Node installed
-2. In one terminal
+Production UI build embeds static export into container during `make build`.
 
-  * `cd client`
-  * `npm install`
-  * `npm run start`
-  * This will start a debug node server on `localhost:8081`.  It'll proxy all unhandled requests to `localhost:8080`
+#### WSL / No-Docker Local Development
 
-3. In another terminal
-  * Ensure that $GOPATH is set to the directory with your go source code and binaries + ensure that $GOPATH is part of $PATH.
-  * `go get -u github.com/jteeuwen/go-bindata/...`
-  * `go generate ./pkg/...`
-  * `GO111MODULE=on go run cmd/kuard/*.go --debug`
-4. Open your browser to http://localhost:8081.
+If you cannot run Docker locally (e.g. minimal WSL distro), you can still do full stack dev:
 
-This should support live reload of any changes to the client.  The Go server will need to be exited and restarted to see changes.
+```
+make dev            # runs scripts/dev.sh
+```
 
-### TODO
-* [ ] Make file system browser better.  Show size, permissions, etc.  Might be able to do this by faking out an `index.html` as part of the http.FileSystem stuff.
-* [ ] Clean up form for keygen workload.  It is too big and the form build doesn't have enough flexibility to really shrink it down.
-* [ ] Get rid of go-bindata as it is abandoned.
+What it does:
+* Starts (or reuses) Next.js dev server on :8081 via Bun.
+* Runs backend with `NEXT_DEV=1` so root `/` proxies to that dev server.
+* If you install `nats-server` and run `scripts/dev.sh --with-nats`, it will start a local JetStream instance under `.dev/nats`.
+
+Manual alternative:
+1. (Optional) Install NATS: `curl -L https://github.com/nats-io/nats-server/releases/latest/download/nats-server-linux-amd64.zip` (unzip & add to PATH)
+2. Start NATS (optional): `nats-server -js -sd .dev/nats`
+3. Terminal A: `cd web && bun install && bun run dev`
+4. Terminal B: `NEXT_DEV=1 NATS_URL=nats://127.0.0.1:4222 go run ./cmd/kuard --debug`
+5. Browse: http://localhost:8080
+
+Logs are written to `.dev/logs` when using the helper script.
+
+### Completed Modernization Tasks
+* [x] Replace go-bindata with native file serving & templates
+* [x] Migrate UI to Next.js + Bun + Tailwind
+* [x] Introduce generic JSON hook with reload
+* [x] Enhance filesystem browser (icons, breadcrumb, sorting)
+* [x] Simplify keygen workload form
+* [x] NATS JetStream backend (now required; in-memory removed)
+* [x] Add unit / integration / fuzz tests + coverage target
+* [x] Multi-stage Docker + distroless runtime
+
+### Remaining Ideas / Future Work
+* Richer NATS stats (pending/ack counts) in /memq/server/stats
+* Dark mode + improved responsive layout
+* UI surfacing build metadata & backend mode (NATS vs memory)
+* More advanced FS permissions/owner info (needs API extension)
+* Additional chaos / probe controls in UI

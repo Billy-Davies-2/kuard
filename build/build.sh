@@ -43,11 +43,14 @@ export CGO_ENABLED=0
 export GOARCH="${ARCH}"
 export GO111MODULE=on
 
-(
-  cd client
-  npm install --loglevel=error
-  npm run build
-)
+# Legacy script retained for compatibility; modern build uses Makefile.
+# Perform a production Next.js export if Bun is available.
+if command -v bun >/dev/null 2>&1; then
+  echo "Building web UI (Next.js) via Bun"
+  (cd web && bun install && bun run build)
+else
+  echo "WARN: bun not found; skipping web UI build (use 'make web-build')" >&2
+fi
 
 go generate ${GO_FLAGS} ./cmd/... ./pkg/...
 go install                                                         \

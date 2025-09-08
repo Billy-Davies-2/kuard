@@ -1,0 +1,24 @@
+$ bunx next dev -p 8081
+  ▲ Next.js 14.2.5
+  - Local:        http://localhost:8081
+
+ ✓ Starting...
+ ✓ Ready in 1693ms
+ ○ Compiling / ...
+ ✓ Compiled / in 3s (295 modules)
+ GET / 200 in 3322ms
+ ○ Compiling /fs ...
+ ✓ Compiled /fs in 572ms (301 modules)
+ ✓ Compiled /_error in 388ms (303 modules)
+ GET /fsapi?path=%2F&limit=200&offset=0 404 in 522ms
+ ✓ Compiled /memq in 432ms (307 modules)
+ GET /memq/server/stats 404 in 122ms
+ ○ Compiling /keygen ...
+ ✓ Compiled /keygen in 527ms (313 modules)
+ GET /keygen 200 in 142ms
+ ✓ Compiled /dns in 472ms (317 modules)
+ GET /keygen 200 in 134ms
+ ✓ Compiled /mem in 431ms (321 modules)
+ GET /mem/api 404 in 122ms
+ GET / 200 in 191ms
+[?25h

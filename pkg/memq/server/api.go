@@ -17,110 +17,107 @@ limitations under the License.
 package memqserver
 
 import (
-	"io/ioutil"
+	"io"
 	"net/http"
 
-	"github.com/julienschmidt/httprouter"
 	"github.com/kubernetes-up-and-running/kuard/pkg/apiutils"
+	"github.com/kubernetes-up-and-running/kuard/pkg/route"
 )
 
 type Server struct {
-	broker *Broker
+	nb *natsBackend // required NATS backend
 }
 
 func NewServer() *Server {
-	return &Server{
-		broker: NewBroker(),
-	}
+	s := &Server{nb: newNATSBackend()}
+	return s
 }
 
-func (s *Server) AddRoutes(router *httprouter.Router, base string) {
-	router.GET(base+"/stats", s.GetStats)
-	router.PUT(base+"/queues/:queue", s.CreateQueue)
-	router.DELETE(base+"/queues/:queue", s.DeleteQueue)
-	router.POST(base+"/queues/:queue/drain", s.DrainQueue)
-	router.POST(base+"/queues/:queue/dequeue", s.Dequeue)
-	router.POST(base+"/queues/:queue/enqueue", s.Enqueue)
+func (s *Server) AddRoutes(router route.Router, base string) {
+	router.GET(base+"/stats", http.HandlerFunc(s.GetStats))
+	router.PUT(base+"/queues", http.HandlerFunc(s.CreateQueue))       // ?queue=name
+	router.DELETE(base+"/queues", http.HandlerFunc(s.DeleteQueue))    // ?queue=name
+	router.POST(base+"/queues/drain", http.HandlerFunc(s.DrainQueue)) // ?queue=name
+	router.POST(base+"/queues/dequeue", http.HandlerFunc(s.Dequeue))  // ?queue=name
+	router.POST(base+"/queues/enqueue", http.HandlerFunc(s.Enqueue))  // ?queue=name
 }
 
-func (s *Server) CreateQueue(w http.ResponseWriter, r *http.Request, p httprouter.Params) {
-	qName := p.ByName("queue")
-	if len(qName) == 0 {
+func getQueueParam(r *http.Request) string { return r.URL.Query().Get("queue") }
+
+func (s *Server) CreateQueue(w http.ResponseWriter, r *http.Request) {
+	qName := getQueueParam(r)
+	if qName == "" {
 		http.Error(w, ErrEmptyName.Error(), http.StatusBadRequest)
 		return
 	}
-	err := s.broker.CreateQueue(qName)
+	err := s.nb.CreateQueue(qName)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 	}
 }
 
-func (s *Server) DeleteQueue(w http.ResponseWriter, r *http.Request, p httprouter.Params) {
-	qName := p.ByName("queue")
-	if len(qName) == 0 {
+func (s *Server) DeleteQueue(w http.ResponseWriter, r *http.Request) {
+	qName := getQueueParam(r)
+	if qName == "" {
 		http.Error(w, ErrEmptyName.Error(), http.StatusBadRequest)
 		return
 	}
-	err := s.broker.DeleteQueue(qName)
+	err := s.nb.DeleteQueue(qName)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 	}
 }
 
-func (s *Server) DrainQueue(w http.ResponseWriter, r *http.Request, p httprouter.Params) {
-	qName := p.ByName("queue")
-	if len(qName) == 0 {
+func (s *Server) DrainQueue(w http.ResponseWriter, r *http.Request) {
+	qName := getQueueParam(r)
+	if qName == "" {
 		http.Error(w, ErrEmptyName.Error(), http.StatusBadRequest)
 		return
 	}
-	err := s.broker.DrainQueue(qName)
+	err := s.nb.DrainQueue(qName)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 	}
 }
 
-func (s *Server) Enqueue(w http.ResponseWriter, r *http.Request, p httprouter.Params) {
-	body, err := ioutil.ReadAll(r.Body)
+func (s *Server) Enqueue(w http.ResponseWriter, r *http.Request) {
+	body, err := io.ReadAll(r.Body)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
-		w.WriteHeader(http.StatusInternalServerError)
 		return
 	}
-	qName := p.ByName("queue")
-	if len(qName) == 0 {
+	qName := getQueueParam(r)
+	if qName == "" {
 		http.Error(w, ErrEmptyName.Error(), http.StatusBadRequest)
 		return
 	}
-
-	msg, err := s.broker.PutMessage(qName, string(body))
+	msg, err := s.nb.PutMessage(qName, string(body))
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-
 	apiutils.ServeJSON(w, msg)
 }
 
-func (s *Server) Dequeue(w http.ResponseWriter, r *http.Request, p httprouter.Params) {
-	qName := p.ByName("queue")
-	if len(qName) == 0 {
+func (s *Server) Dequeue(w http.ResponseWriter, r *http.Request) {
+	qName := getQueueParam(r)
+	if qName == "" {
 		http.Error(w, ErrEmptyName.Error(), http.StatusBadRequest)
 		return
 	}
-
-	m, err := s.broker.GetMessage(qName)
+	m, err := s.nb.GetMessage(qName)
 	if err == ErrEmptyQueue {
 		w.WriteHeader(http.StatusNoContent)
 		return
-	} else if err != nil {
+	}
+	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-
 	apiutils.ServeJSON(w, &m)
 }
 
-func (s *Server) GetStats(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
-	stats := s.broker.Stats()
+func (s *Server) GetStats(w http.ResponseWriter, r *http.Request) {
+	stats := s.nb.Stats()
 	apiutils.ServeJSON(w, &stats)
 }

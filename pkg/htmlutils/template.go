@@ -20,7 +20,7 @@ import (
 	"bytes"
 	"fmt"
 	"html/template"
-	"log"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"sync"
@@ -76,16 +76,16 @@ func (g *TemplateGroup) GetTemplate(name string) *template.Template {
 func (g *TemplateGroup) LoadTemplates() *template.Template {
 	tData, err := sitedata.LoadFilesInDir("templates")
 	if err != nil {
-		log.Printf("Error loading template files: %v", err)
+		slog.Error("error loading template files", "error", err)
 	}
 
 	t := template.New("").Funcs(FuncMap())
 
 	for f, fData := range tData {
-		log.Printf("Loading template for %v", f)
+		slog.Debug("loading template", "file", f)
 		_, err := t.New(f).Parse(string(fData))
 		if err != nil {
-			log.Printf("ERROR: Could parse template %v: %v", f, err)
+			slog.Error("could not parse template", "file", f, "error", err)
 		}
 	}
 	return t

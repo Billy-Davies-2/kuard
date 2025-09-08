@@ -5,7 +5,7 @@ Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
 
-    http://www.apache.org/licenses/LICENSE-2.0
+	http://www.apache.org/licenses/LICENSE-2.0
 
 Unless required by applicable law or agreed to in writing, software
 distributed under the License is distributed on an "AS IS" BASIS,
@@ -16,11 +16,12 @@ limitations under the License.
 package app
 
 import (
-	"html/template"
-	"log"
+	"encoding/json"
+	"log/slog"
 	"net"
 	"net/http"
 	"net/http/httputil"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -29,6 +30,7 @@ import (
 	"github.com/kubernetes-up-and-running/kuard/pkg/debugprobe"
 	"github.com/kubernetes-up-and-running/kuard/pkg/dnsapi"
 	"github.com/kubernetes-up-and-running/kuard/pkg/env"
+	"github.com/kubernetes-up-and-running/kuard/pkg/fsapi"
 	"github.com/kubernetes-up-and-running/kuard/pkg/htmlutils"
 	"github.com/kubernetes-up-and-running/kuard/pkg/keygen"
 	"github.com/kubernetes-up-and-running/kuard/pkg/memory"
@@ -37,8 +39,8 @@ import (
 	"github.com/kubernetes-up-and-running/kuard/pkg/version"
 
 	"github.com/felixge/httpsnoop"
-	"github.com/julienschmidt/httprouter"
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
 func init() {
@@ -60,25 +62,24 @@ func promMiddleware(h http.Handler) http.Handler {
 
 func loggingMiddleware(handler http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		log.Printf("%s %s %s", r.RemoteAddr, r.Method, r.URL)
+		slog.Info("request", "remote", r.RemoteAddr, "method", r.Method, "url", r.URL.String())
 		handler.ServeHTTP(w, r)
 	})
 }
 
 type pageContext struct {
-	URLBase      string       `json:"urlBase"`
-	Hostname     string       `json:"hostname"`
-	Addrs        []string     `json:"addrs"`
-	Version      string       `json:"version"`
-	VersionColor template.CSS `json:"versionColor"`
-	RequestDump  string       `json:"requestDump"`
-	RequestProto string       `json:"requestProto"`
-	RequestAddr  string       `json:"requestAddr"`
+	URLBase      string   `json:"urlBase"`
+	Hostname     string   `json:"hostname"`
+	Addrs        []string `json:"addrs"`
+	Version      string   `json:"version"`
+	VersionColor string   `json:"versionColor"`
+	RequestDump  string   `json:"requestDump"`
+	RequestProto string   `json:"requestProto"`
+	RequestAddr  string   `json:"requestAddr"`
 }
 
 type App struct {
-	c  Config
-	tg *htmlutils.TemplateGroup
+	c Config
 
 	m     *memory.MemoryAPI
 	live  *debugprobe.Probe
@@ -88,7 +89,13 @@ type App struct {
 	kg    *keygen.KeyGen
 	mq    *memqserver.Server
 
-	r *httprouter.Router
+	r *SimpleRouter
+}
+
+// BuildServer builds an *http.Server with middleware applied.
+func (k *App) BuildServer() *http.Server {
+	handler := promMiddleware(loggingMiddleware(k.r))
+	return &http.Server{Addr: k.c.ServeAddr, Handler: handler}
 }
 
 func (k *App) getPageContext(r *http.Request, urlBase string) *pageContext {
@@ -108,7 +115,7 @@ func (k *App) getPageContext(r *http.Request, urlBase string) *pageContext {
 	}
 
 	c.Version = version.VERSION
-	c.VersionColor = template.CSS(htmlutils.ColorFromString(version.VERSION))
+	c.VersionColor = htmlutils.ColorFromString(version.VERSION)
 	reqDump, _ := httputil.DumpRequest(r, false)
 	c.RequestDump = strings.TrimSpace(string(reqDump))
 	c.RequestProto = r.Proto
@@ -117,11 +124,7 @@ func (k *App) getPageContext(r *http.Request, urlBase string) *pageContext {
 	return c
 }
 
-func (k *App) getRootHandler(urlBase string) httprouter.Handle {
-	return httprouter.Handle(func(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
-		k.tg.Render(w, "index.html", k.getPageContext(r, urlBase))
-	})
-}
+// legacy root template removed
 
 // Exists reports whether the named file or directory exists.
 func fileExists(name string) bool {
@@ -136,27 +139,27 @@ func fileExists(name string) bool {
 func (k *App) Run() {
 	r := promMiddleware(loggingMiddleware(k.r))
 
-	// Look to see if we can find TLS certs
 	certFile := filepath.Join(k.c.TLSDir, "kuard.crt")
 	keyFile := filepath.Join(k.c.TLSDir, "kuard.key")
 	if fileExists(certFile) && fileExists(keyFile) {
 		go func() {
-			log.Printf("Serving HTTPS on %v", k.c.TLSAddr)
-			log.Fatal(http.ListenAndServeTLS(k.c.TLSAddr, certFile, keyFile, r))
+			slog.Info("serving https", "addr", k.c.TLSAddr)
+			if err := http.ListenAndServeTLS(k.c.TLSAddr, certFile, keyFile, r); err != nil {
+				slog.Error("https server error", "error", err)
+			}
 		}()
 	} else {
-		log.Printf("Could not find certificates to serve TLS")
+		slog.Warn("tls certs not found; skipping https")
 	}
 
-	log.Printf("Serving on HTTP on %v", k.c.ServeAddr)
-	log.Fatal(http.ListenAndServe(k.c.ServeAddr, r))
+	slog.Info("serving http", "addr", k.c.ServeAddr)
+	if err := http.ListenAndServe(k.c.ServeAddr, r); err != nil {
+		slog.Error("http server error", "error", err)
+	}
 }
 
 func NewApp() *App {
-	k := &App{
-		tg: &htmlutils.TemplateGroup{},
-		r:  httprouter.New(),
-	}
+	k := &App{r: NewSimpleRouter()}
 
 	// Init all of the subcomponents
 
@@ -168,20 +171,40 @@ func NewApp() *App {
 	k.dns = dnsapi.New()
 	k.kg = keygen.New()
 	k.mq = memqserver.NewServer()
+	fsa := fsapi.New()
 
 	// Add handlers
 	for _, prefix := range []string{"", "/a", "/b", "/c"} {
-		rootHandler := k.getRootHandler(prefix)
-		router.GET(prefix+"/", rootHandler)
-		router.GET(prefix+"/-/*path", rootHandler)
+		if prefix != "" { // variant redirects only for non-root
+			pr := prefix
+			router.GET(prefix+"/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				http.Redirect(w, r, "/?variant="+strings.TrimPrefix(pr, "/"), http.StatusTemporaryRedirect)
+			}))
+			router.GET(prefix+"/-/*path", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				http.Redirect(w, r, "/?variant="+strings.TrimPrefix(pr, "/"), http.StatusTemporaryRedirect)
+			}))
+		}
 
-		router.Handler("GET", prefix+"/metrics", prometheus.Handler())
+		// JSON page info (modern UI uses this)
+		router.GET(prefix+"/pageinfo", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			ctx := k.getPageContext(r, prefix)
+			w.Header().Set("Content-Type", "application/json")
+			if err := json.NewEncoder(w).Encode(ctx); err != nil {
+				slog.Error("encode pageinfo", "error", err)
+				w.WriteHeader(http.StatusInternalServerError)
+			}
+		}))
+
+		router.GET(prefix+"/metrics", promhttp.Handler())
 
 		// Add the static files
 		sitedata.AddRoutes(router, prefix+"/built")
 		sitedata.AddRoutes(router, prefix+"/static")
 
-		router.Handler("GET", prefix+"/fs/*filepath", http.StripPrefix(prefix+"/fs", http.FileServer(http.Dir("/"))))
+		// Legacy raw file serving remains for direct download.
+		router.GET(prefix+"/fs/*filepath", http.StripPrefix(prefix+"/fs", http.FileServer(http.Dir("/"))))
+		// JSON metadata API for enhanced UI.
+		fsa.AddRoutes(router, prefix+"/fsapi")
 
 		k.m.AddRoutes(router, prefix+"/mem")
 		k.live.AddRoutes(router, prefix+"/healthy")
@@ -190,6 +213,34 @@ func NewApp() *App {
 		k.dns.AddRoutes(router, prefix+"/dns")
 		k.kg.AddRoutes(router, prefix+"/keygen")
 		k.mq.AddRoutes(router, prefix+"/memq/server")
+	}
+
+	// Mount Next.js UI at root
+	nextDev := os.Getenv("NEXT_DEV")
+	if nextDev != "" {
+		proxy := httputil.NewSingleHostReverseProxy(&url.URL{Scheme: "http", Host: "localhost:8081"})
+		proxyHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { proxy.ServeHTTP(w, r) })
+		// Explicit common asset paths
+		k.r.GET("/_next/*filepath", proxyHandler)
+		k.r.GET("/favicon.ico", proxyHandler)
+		k.r.GET("/robots.txt", proxyHandler)
+		k.r.GET("/manifest.json", proxyHandler)
+		// Catch-all UI (keep last so API routes above win)
+		k.r.GET("/", proxyHandler)
+		k.r.GET("/*filepath", proxyHandler)
+	} else {
+		// Production: serve pre-exported static site if available
+		if _, err := os.Stat("web/out"); err == nil {
+			fs := http.FileServer(http.Dir("web/out"))
+			k.r.GET("/", fs)
+			k.r.GET("/*filepath", fs)
+		} else if _, err := os.Stat("web/.next"); err == nil {
+			// Fallback: serve built assets (not full SSR)
+			k.r.GET("/_next/*filepath", http.FileServer(http.Dir("web")))
+			// Index fallback
+			k.r.GET("/", http.FileServer(http.Dir("web")))
+			k.r.GET("/*filepath", http.FileServer(http.Dir("web")))
+		}
 	}
 
 	return k

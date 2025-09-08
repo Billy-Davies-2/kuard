@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-// Package sitedata provides static data compiled in via go-bindata.
+// Package sitedata provides static data compiled in via Go embed.
 package sitedata
 
-//go:generate go-bindata -pkg $GOPACKAGE -prefix ../../sitedata/ -o bindata.go ../../sitedata/...
+// (Formerly used go-bindata.)

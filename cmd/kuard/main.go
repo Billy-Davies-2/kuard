@@ -17,9 +17,14 @@ limitations under the License.
 package main
 
 import (
+	"context"
 	"encoding/json"
-	"log"
-	"strings"
+	"log/slog"
+	"net/http"
+	"os"
+	"os/signal"
+	"syscall"
+	"time"
 
 	"github.com/spf13/pflag"
 	"github.com/spf13/viper"
@@ -29,31 +34,45 @@ import (
 )
 
 func main() {
-	app := app.NewApp()
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
 
+	application := app.NewApp()
 	v := viper.GetViper()
-
-	app.BindConfig(v, pflag.CommandLine)
-
+	application.BindConfig(v, pflag.CommandLine)
 	pflag.Parse()
 
-	log.Printf("Starting kuard version: %v", version.VERSION)
-	log.Println(strings.Repeat("*", 70))
-	log.Println("* WARNING: This server may expose sensitive")
-	log.Println("* and secret information. Be careful.")
-	log.Println(strings.Repeat("*", 70))
+	slog.Info("starting kuard", "version", version.VERSION)
+	slog.Warn("this server may expose sensitive and secret information; be careful")
 
 	dumpConfig(v)
+	application.LoadConfig(v)
 
-	app.LoadConfig(v)
-	app.Run()
+	server := application.BuildServer()
+	go func() {
+		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			slog.Error("http server error", "error", err)
+		}
+	}()
+	slog.Info("serving http", "addr", server.Addr)
+
+	<-ctx.Done()
+	slog.Info("shutdown signal received")
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := server.Shutdown(shutdownCtx); err != nil {
+		slog.Error("graceful shutdown failed", "error", err)
+		_ = server.Close()
+	}
+	slog.Info("server exited")
+	os.Exit(0)
 }
 
 func dumpConfig(v *viper.Viper) {
 	b, err := json.MarshalIndent(v.AllSettings(), "", "  ")
 	if err != nil {
-		log.Printf("Could not dump config: %v", err)
+		slog.Error("could not dump config", "error", err)
 		return
 	}
-	log.Printf("Config: \n%v\n", string(b))
+	slog.Info("config dump", "config", string(b))
 }

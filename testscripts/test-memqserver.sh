@@ -19,20 +19,38 @@ set -o nounset
 set -o pipefail
 set -o xtrace
 
-HOST=127.0.0.1:8080
-URLPREFIX=/memq/server
+HOST=http://127.0.0.1:8080
+BASE=/memq/server
+Q=work
 
-curl -X PUT ${HOST}${URLPREFIX}/queues/work
-curl -X POST ${HOST}${URLPREFIX}/queues/work/enqueue -d "message 1"
-curl -X POST ${HOST}${URLPREFIX}/queues/work/enqueue -d "message 2"
-curl -X POST ${HOST}${URLPREFIX}/queues/work/enqueue -d "message 3"
-curl ${HOST}${URLPREFIX}/stats
-curl -X POST ${HOST}${URLPREFIX}/queues/work/dequeue
-curl -X POST ${HOST}${URLPREFIX}/queues/work/dequeue
-curl -X POST ${HOST}${URLPREFIX}/queues/work/dequeue
-curl -X POST ${HOST}${URLPREFIX}/queues/work/enqueue -d "message 1"
-curl -X POST ${HOST}${URLPREFIX}/queues/work/enqueue -d "message 2"
-curl -X POST ${HOST}${URLPREFIX}/queues/work/enqueue -d "message 3"
-curl -X POST ${HOST}${URLPREFIX}/queues/work/drain
-curl ${HOST}${URLPREFIX}/stats
-curl -X DELETE ${HOST}${URLPREFIX}/queues/work
+set -o errexit
+echo "== create queue"
+curl -sf -X PUT "${HOST}${BASE}/queues?queue=${Q}"
+
+echo "== enqueue 3"
+for m in 1 2 3; do
+	curl -sf -X POST "${HOST}${BASE}/queues/enqueue?queue=${Q}" -d "message ${m}" >/dev/null
+done
+
+echo "== stats after enqueue"
+curl -sf "${HOST}${BASE}/stats" | jq '.queues[] | select(.name=="'"${Q}"'")'
+
+echo "== dequeue 3"
+for i in 1 2 3; do
+	curl -sf -X POST "${HOST}${BASE}/queues/dequeue?queue=${Q}" || true
+done
+
+echo "== enqueue 3 again"
+for m in 1 2 3; do
+	curl -sf -X POST "${HOST}${BASE}/queues/enqueue?queue=${Q}" -d "again ${m}" >/dev/null
+done
+
+echo "== drain"
+curl -sf -X POST "${HOST}${BASE}/queues/drain?queue=${Q}"
+
+echo "== final stats"
+curl -sf "${HOST}${BASE}/stats" | jq '.queues[] | select(.name=="'"${Q}"'")'
+
+echo "== delete"
+curl -sf -X DELETE "${HOST}${BASE}/queues?queue=${Q}"
+echo "DONE"

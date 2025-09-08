@@ -22,8 +22,8 @@ import (
 	"runtime/debug"
 	"strconv"
 
-	"github.com/julienschmidt/httprouter"
 	"github.com/kubernetes-up-and-running/kuard/pkg/apiutils"
+	"github.com/kubernetes-up-and-running/kuard/pkg/route"
 )
 
 type MemoryAPI struct {
@@ -39,13 +39,13 @@ func New() *MemoryAPI {
 	return &MemoryAPI{}
 }
 
-func (e *MemoryAPI) AddRoutes(r *httprouter.Router, base string) {
-	r.GET(base+"/api", e.APIGet)
-	r.POST(base+"/api/alloc", e.APIAlloc)
-	r.POST(base+"/api/clear", e.APIClear)
+func (e *MemoryAPI) AddRoutes(r route.Router, base string) {
+	r.GET(base+"/api", http.HandlerFunc(e.APIGet))
+	r.POST(base+"/api/alloc", http.HandlerFunc(e.APIAlloc))
+	r.POST(base+"/api/clear", http.HandlerFunc(e.APIClear))
 }
 
-func (e *MemoryAPI) APIGet(w http.ResponseWriter, _ *http.Request, _ httprouter.Params) {
+func (e *MemoryAPI) APIGet(w http.ResponseWriter, _ *http.Request) {
 	resp := &MemoryStatus{}
 
 	runtime.ReadMemStats(&resp.MemStats)
@@ -53,7 +53,7 @@ func (e *MemoryAPI) APIGet(w http.ResponseWriter, _ *http.Request, _ httprouter.
 	apiutils.ServeJSON(w, resp)
 }
 
-func (m *MemoryAPI) APIAlloc(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
+func (m *MemoryAPI) APIAlloc(w http.ResponseWriter, r *http.Request) {
 	sSize := r.URL.Query().Get("size")
 	if len(sSize) == 0 {
 		http.Error(w, "size not specified", http.StatusBadRequest)
@@ -73,7 +73,7 @@ func (m *MemoryAPI) APIAlloc(w http.ResponseWriter, r *http.Request, _ httproute
 	m.leaks = append(m.leaks, leak)
 }
 
-func (m *MemoryAPI) APIClear(w http.ResponseWriter, _ *http.Request, _ httprouter.Params) {
+func (m *MemoryAPI) APIClear(w http.ResponseWriter, _ *http.Request) {
 	m.leaks = nil
 	runtime.GC()
 	debug.FreeOSMemory()

@@ -29,3 +29,11 @@ _testmain.go
 /.*-container
 /.*-dockerfile
 /.*-image
+
+# IDEs and editors
+.vscode/
+.idea/
+*.swp
+*~
+
+coverage.out

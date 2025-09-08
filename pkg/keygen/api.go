@@ -21,7 +21,6 @@ import (
 	"net/http"
 
 	"github.com/kubernetes-up-and-running/kuard/pkg/apiutils"
-	"github.com/julienschmidt/httprouter"
 )
 
 // ProbeStatus is returned from a GET to this API endpoing
@@ -35,7 +34,7 @@ type History struct {
 	Data string `json:"data"`
 }
 
-func (kg *KeyGen) APIPut(w http.ResponseWriter, r *http.Request, params httprouter.Params) {
+func (kg *KeyGen) APIPut(w http.ResponseWriter, r *http.Request) {
 	c := Config{}
 
 	err := json.NewDecoder(r.Body).Decode(&c)
@@ -46,10 +45,10 @@ func (kg *KeyGen) APIPut(w http.ResponseWriter, r *http.Request, params httprout
 
 	kg.LoadConfig(c)
 
-	kg.APIGet(w, r, params)
+	kg.APIGet(w, r)
 }
 
-func (kg *KeyGen) APIGet(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
+func (kg *KeyGen) APIGet(w http.ResponseWriter, r *http.Request) {
 	kg.mu.Lock()
 	defer kg.mu.Unlock()
 
