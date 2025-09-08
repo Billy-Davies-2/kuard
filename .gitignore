@@ -37,3 +37,4 @@ _testmain.go
 *~
 
 coverage.out
+./dev/*
