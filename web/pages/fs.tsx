@@ -4,6 +4,9 @@ import FSBrowser from '../components/FSBrowser';
 
 export default function FSPage(){
   return <Layout>
-    <FSBrowser />
+    <div className="animate-fade-in">
+      <FSBrowser />
+    </div>
   </Layout>;
 }
+
